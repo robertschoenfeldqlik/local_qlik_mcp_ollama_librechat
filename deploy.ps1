@@ -19,10 +19,10 @@ if ([string]::IsNullOrWhiteSpace($QlikTenantUrl)) {
     exit 1
 }
 
-$QlikApiKey = Read-Host "Qlik Cloud API key"
+$QlikOAuthClientId = Read-Host "Qlik Cloud OAuth Client ID"
 
-if ([string]::IsNullOrWhiteSpace($QlikApiKey)) {
-    Write-Error "API key cannot be empty."
+if ([string]::IsNullOrWhiteSpace($QlikOAuthClientId)) {
+    Write-Error "OAuth Client ID cannot be empty."
     exit 1
 }
 
@@ -41,8 +41,8 @@ function New-HexSecret($Bytes) {
 if (Test-Path $EnvFile) {
     Write-Host "Existing .env found -- updating Qlik credentials only."
     $content = Get-Content $EnvFile -Raw
-    $content = $content -replace "(?m)^QLIK_TENANT_URL=.*", "QLIK_TENANT_URL=$QlikTenantUrl"
-    $content = $content -replace "(?m)^QLIK_API_KEY=.*",    "QLIK_API_KEY=$QlikApiKey"
+    $content = $content -replace "(?m)^QLIK_TENANT_URL=.*",      "QLIK_TENANT_URL=$QlikTenantUrl"
+    $content = $content -replace "(?m)^QLIK_OAUTH_CLIENT_ID=.*",  "QLIK_OAUTH_CLIENT_ID=$QlikOAuthClientId"
     Set-Content -Path $EnvFile -Value $content -NoNewline
 }
 else {
@@ -61,7 +61,7 @@ else {
 #==============================================================#
 
 QLIK_TENANT_URL=$QlikTenantUrl
-QLIK_API_KEY=$QlikApiKey
+QLIK_OAUTH_CLIENT_ID=$QlikOAuthClientId
 
 CREDS_KEY=$CredsKey
 CREDS_IV=$CredsIV
@@ -85,8 +85,8 @@ DB_PORT=5432
 }
 
 Write-Host ""
-Write-Host "Qlik tenant:  $QlikTenantUrl"
-Write-Host "Qlik API key: $($QlikApiKey.Substring(0, [Math]::Min(8, $QlikApiKey.Length)))..."
+Write-Host "Qlik tenant:     $QlikTenantUrl"
+Write-Host "OAuth Client ID: $($QlikOAuthClientId.Substring(0, [Math]::Min(8, $QlikOAuthClientId.Length)))..."
 Write-Host ""
 
 # --- Start the stack ---
@@ -106,4 +106,8 @@ docker compose -f "$ScriptDir\docker-compose.yml" exec -T ollama ollama pull glm
 Write-Host ""
 Write-Host "=============================================="
 Write-Host "  Ready!  Open http://localhost:3080"
+Write-Host ""
+Write-Host "  To connect Qlik MCP, click the MCP Servers"
+Write-Host "  dropdown in the chat, select 'qlik', then"
+Write-Host "  click Authenticate to sign in via OAuth."
 Write-Host "=============================================="

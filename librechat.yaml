@@ -24,7 +24,16 @@ mcpServers:
   qlik:
     type: streamable-http
     url: "${QLIK_TENANT_URL}/api/ai/mcp"
-    headers:
-      Authorization: "Bearer ${QLIK_API_KEY}"
+    requiresOAuth: true
+    oauth:
+      authorization_url: "${QLIK_TENANT_URL}/oauth/authorize"
+      token_url: "${QLIK_TENANT_URL}/oauth/token"
+      client_id: "${QLIK_OAUTH_CLIENT_ID}"
+      redirect_uri: "http://localhost:3080/api/mcp/qlik/oauth/callback"
+      scope: "user_default mcp:execute"
+      grant_types_supported: ["authorization_code", "refresh_token"]
+      token_endpoint_auth_methods_supported: ["none"]
+      response_types_supported: ["code"]
+      code_challenge_methods_supported: ["S256"]
     chatMenu: true
     startup: true

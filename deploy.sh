@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
-ENV_EXAMPLE="$SCRIPT_DIR/.env.example"
 
 echo "=============================================="
 echo "  LibreChat + Ollama + Qlik MCP  —  Deploy"
@@ -21,10 +20,10 @@ if [[ -z "$QLIK_TENANT_URL" ]]; then
   exit 1
 fi
 
-read -rp "Qlik Cloud API key: " QLIK_API_KEY
+read -rp "Qlik Cloud OAuth Client ID: " QLIK_OAUTH_CLIENT_ID
 
-if [[ -z "$QLIK_API_KEY" ]]; then
-  echo "Error: API key cannot be empty." >&2
+if [[ -z "$QLIK_OAUTH_CLIENT_ID" ]]; then
+  echo "Error: OAuth Client ID cannot be empty." >&2
   exit 1
 fi
 
@@ -34,9 +33,9 @@ echo
 
 if [[ -f "$ENV_FILE" ]]; then
   echo "Existing .env found — updating Qlik credentials only."
-  # Update the two Qlik lines in-place
+  # Update the Qlik lines in-place
   sed -i "s|^QLIK_TENANT_URL=.*|QLIK_TENANT_URL=${QLIK_TENANT_URL}|" "$ENV_FILE"
-  sed -i "s|^QLIK_API_KEY=.*|QLIK_API_KEY=${QLIK_API_KEY}|" "$ENV_FILE"
+  sed -i "s|^QLIK_OAUTH_CLIENT_ID=.*|QLIK_OAUTH_CLIENT_ID=${QLIK_OAUTH_CLIENT_ID}|" "$ENV_FILE"
 else
   echo "Generating new .env with fresh secrets..."
   CREDS_KEY=$(openssl rand -hex 16)
@@ -51,7 +50,7 @@ else
 #==============================================================#
 
 QLIK_TENANT_URL=${QLIK_TENANT_URL}
-QLIK_API_KEY=${QLIK_API_KEY}
+QLIK_OAUTH_CLIENT_ID=${QLIK_OAUTH_CLIENT_ID}
 
 CREDS_KEY=${CREDS_KEY}
 CREDS_IV=${CREDS_IV}
@@ -75,8 +74,8 @@ EOF
 fi
 
 echo
-echo "Qlik tenant:  $QLIK_TENANT_URL"
-echo "Qlik API key: ${QLIK_API_KEY:0:8}..."
+echo "Qlik tenant:    $QLIK_TENANT_URL"
+echo "OAuth Client ID: ${QLIK_OAUTH_CLIENT_ID:0:8}..."
 echo
 
 # --- Start the stack ---
@@ -94,4 +93,8 @@ docker compose -f "$SCRIPT_DIR/docker-compose.yml" exec -T ollama ollama pull gl
 echo
 echo "=============================================="
 echo "  Ready!  Open http://localhost:3080"
+echo ""
+echo "  To connect Qlik MCP, click the MCP Servers"
+echo "  dropdown in the chat, select 'qlik', then"
+echo "  click Authenticate to sign in via OAuth."
 echo "=============================================="

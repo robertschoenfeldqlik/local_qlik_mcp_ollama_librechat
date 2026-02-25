@@ -23,7 +23,7 @@ services:
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
       - RAG_API_URL=${RAG_API_URL}
       - QLIK_TENANT_URL=${QLIK_TENANT_URL}
-      - QLIK_API_KEY=${QLIK_API_KEY}
+      - QLIK_OAUTH_CLIENT_ID=${QLIK_OAUTH_CLIENT_ID}
     volumes:
       - ./librechat.yaml:/app/librechat.yaml:ro
       - librechat_images:/app/client/public/images
