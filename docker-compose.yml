@@ -1,0 +1,91 @@
+services:
+  api:
+    image: ghcr.io/danny-avila/librechat:latest
+    container_name: librechat
+    ports:
+      - "3080:3080"
+    depends_on:
+      mongodb:
+        condition: service_started
+      meilisearch:
+        condition: service_started
+      ollama:
+        condition: service_started
+      rag_api:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+      - MONGO_URI=${MONGO_URI}
+      - MEILISEARCH_HOST=${MEILISEARCH_HOST}
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
+      - RAG_API_URL=${RAG_API_URL}
+      - QLIK_TENANT_URL=${QLIK_TENANT_URL}
+      - QLIK_API_KEY=${QLIK_API_KEY}
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+      - librechat_images:/app/client/public/images
+      - librechat_logs:/app/api/logs
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:8.0
+    container_name: librechat-mongodb
+    volumes:
+      - mongodb_data:/data/db
+    command: mongod --noauth
+    restart: unless-stopped
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.12.3
+    container_name: librechat-meilisearch
+    environment:
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
+      - MEILI_NO_ANALYTICS=true
+    volumes:
+      - meilisearch_data:/meili_data
+    restart: unless-stopped
+
+  vectordb:
+    image: pgvector/pgvector:pg17
+    container_name: librechat-vectordb
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - vectordb_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  rag_api:
+    image: ghcr.io/danny-avila/librechat-rag-api-dev-lite:latest
+    container_name: librechat-rag-api
+    depends_on:
+      vectordb:
+        condition: service_started
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - VECTOR_DB_TYPE=${VECTOR_DB_TYPE}
+      - RAG_PORT=8000
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: librechat-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+  meilisearch_data:
+  vectordb_data:
+  ollama_data:
+  librechat_images:
+  librechat_logs:
