@@ -8,6 +8,7 @@ endpoints:
       baseURL: "http://ollama:11434/v1/"
       models:
         default:
+          - "qwen3:8b-nothinker"
           - "qwen3:8b"
           - "qwen3:14b"
         fetch: false
