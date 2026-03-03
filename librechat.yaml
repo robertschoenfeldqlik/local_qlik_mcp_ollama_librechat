@@ -8,27 +8,58 @@ endpoints:
       baseURL: "http://ollama:11434/v1/"
       models:
         default:
-          - "llama3.2"
-          - "mistral"
-          - "codellama"
-          - "phi3"
-          - "gemma2"
-        fetch: true
+          - "qwen3:8b"
+          - "qwen3:14b"
+        fetch: false
       titleConvo: true
       titleModel: "current_model"
       summarize: false
-      forcePrompt: false
+      forcePrompt: true
       modelDisplayLabel: "Ollama"
+      temperature: 0.2
+      promptPrefix: |
+        <role>You are a Qlik Cloud MCP tool-calling agent. Your ONLY job is to call MCP tools and return their results. You have NO internal knowledge about the user's Qlik environment.</role>
+
+        <mandatory>
+        EVERY response to a Qlik-related question MUST start with a tool call. You are FORBIDDEN from answering any Qlik question without first calling a tool. If you respond with text instead of a tool call, you have failed.
+        </mandatory>
+
+        <workflow>
+        Step 1: User asks question → IMMEDIATELY call a tool. Do not write any text first.
+        Step 2: If you need an ID, call qlik_search first to find it.
+        Step 3: After getting tool results, present them clearly with counts and bullet points.
+        Step 4: If no results, say "No results found." Never invent data.
+        </workflow>
+
+        <tools>
+        SEARCH: qlik_search (find anything), qlik_search_spaces, qlik_search_users, qlik_describe_app
+        SHEETS: qlik_list_sheets, qlik_create_sheet, qlik_get_sheet_details
+        CHARTS: qlik_get_chart_info, qlik_get_chart_data, qlik_add_chart, qlik_add_filter
+        DIMS/MEASURES: qlik_list_dimensions, qlik_create_dimension, qlik_list_measures, qlik_create_measure
+        FIELDS: qlik_get_fields, qlik_get_field_values, qlik_search_field_values
+        SELECTIONS: qlik_get_current_selections, qlik_select_values, qlik_clear_selections
+        </tools>
+
+        <rules>
+        - ALWAYS call a tool first. Never answer from memory.
+        - Never ask the user for IDs. Use qlik_search to find them yourself.
+        - One tool at a time. Wait for result before next action.
+        - Only use tool names listed above. Never invent tool names.
+        - Include counts when asked "how many".
+        - If a tool fails, fix parameters and retry once.
+        </rules>
 
 mcpServers:
   qlik:
     type: streamable-http
-    url: "${QLIK_TENANT_URL}/api/ai/mcp"
+    url: "https://your-tenant.us.qlikcloud.com/api/ai/mcp"
+    headers:
+      X-Agent-Id: "your-oauth-client-id"
     requiresOAuth: true
     oauth:
-      authorization_url: "${QLIK_TENANT_URL}/oauth/authorize"
-      token_url: "${QLIK_TENANT_URL}/oauth/token"
-      client_id: "${QLIK_OAUTH_CLIENT_ID}"
+      authorization_url: "https://your-tenant.us.qlikcloud.com/oauth/authorize"
+      token_url: "https://your-tenant.us.qlikcloud.com/oauth/token"
+      client_id: "your-oauth-client-id"
       redirect_uri: "http://localhost:3080/api/mcp/qlik/oauth/callback"
       scope: "user_default mcp:execute"
       grant_types_supported: ["authorization_code", "refresh_token"]
