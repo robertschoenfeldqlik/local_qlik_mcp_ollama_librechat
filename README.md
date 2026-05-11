@@ -87,7 +87,7 @@ The script performs a **7-step automated deployment**:
 
 ## Customizations Made to Get Qlik MCP Working
 
-This section documents every customization required to make Qlik Cloud MCP work with LibreChat + Ollama. The upstream repo and LibreChat v0.8.3-rc1 have several issues that must be patched.
+This section documents every customization required to make Qlik Cloud MCP work with LibreChat + Ollama. The upstream repo and LibreChat v0.8.5 (and v0.8.3-rc1 before it) have several issues that must be patched.
 
 ### 1. VECTOR_DB_TYPE Bug Fix
 
@@ -189,7 +189,7 @@ mcpServers:
 
 **File:** `mcp_tools_patched.js` (patches `/app/api/server/services/Tools/mcp.js` inside the LibreChat container)
 
-**Problem:** LibreChat v0.8.3-rc1 has a bug in the MCP server initialization code. In the `reinitMCPServer()` function, line 122 contains:
+**Problem:** LibreChat (v0.8.3-rc1 through at least v0.8.5) has a bug in the MCP server initialization code. In the `reinitMCPServer()` function (line 122 in v0.8.3-rc1, line 168 in v0.8.5):
 
 ```javascript
 if (connection && !oauthRequired) {
@@ -545,4 +545,4 @@ Ensure `VECTOR_DB_TYPE=pgvector` in `.env` (not `pg`).
 - MongoDB runs with `--noauth` (local development only, not production)
 - All images are pulled from public registries (no custom Dockerfiles)
 - Containers use `restart: unless-stopped` for automatic recovery
-- The MCP patch is against LibreChat v0.8.3-rc1 — future versions may fix the OAuth bug natively
+- The MCP patch was originally written for LibreChat v0.8.3-rc1 and re-validated against v0.8.5 (the bug persists). Future versions may fix the OAuth bug natively — check `/app/api/server/services/Tools/mcp.js` for `if (connection && !oauthRequired)` before applying.

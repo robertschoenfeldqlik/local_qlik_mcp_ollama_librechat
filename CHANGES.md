@@ -4,6 +4,21 @@ This document provides an exact line-by-line record of every file modified, what
 
 ---
 
+## Image versions (latest update 2026-05-11)
+
+| Image | Pinned tag | Resolved digest at last update | Version |
+|---|---|---|---|
+| `ghcr.io/danny-avila/librechat` | `latest` | `sha256:a46254938507971e0d4f7ed3f9d116bd9b118f4810b5b75eb716baf575645068` | v0.8.5 (built 2026-04-22) |
+| `ollama/ollama` | `latest` | `sha256:d00473cb58f0082c07cd6ed0d326a8a86f443ab69c51f8fc2b1a41687d45c661` | 0.23.2 (built 2026-05-07) |
+
+**LibreChat upgrade notes (v0.8.3-rc1 → v0.8.5):**
+- `/app/api/server/services/Tools/mcp.js` was substantially refactored upstream (added MCP servers registry, server config inspection, reinspection flow). The line count grew from 183 → 229.
+- The OAuth `fetchTools` bug (`if (connection && !oauthRequired)`) still exists in v0.8.5 — moved from line 122 to line 168. The patch was re-derived against v0.8.5.
+- `mcp_tools_original.js` was updated to track the v0.8.5 baseline.
+- `mcp_tools_patched.js` was rebuilt against v0.8.5 (286 lines, was 240).
+
+---
+
 ## File 1: `.env.example`
 
 **Location:** `/.env.example`
@@ -259,18 +274,19 @@ mcpServers:
 
 **Location:** `/mcp_tools_patched.js`
 **Applies to:** `/app/api/server/services/Tools/mcp.js` inside the LibreChat container
-**Lines changed:** Lines 122-175 (replaced 3 lines with ~55 lines)
+**Baseline:** Originally written against LibreChat v0.8.3-rc1, re-derived against v0.8.5 (the same bug persists, but the surrounding file was substantially refactored upstream — `mcp_tools_original.js` now tracks the v0.8.5 file).
+**Lines changed (v0.8.5):** Lines 168-170 (3 lines) replaced with lines 168-228 (~61 lines)
 
-### Change 4a: OAuth fetchTools bug fix (line 122)
+### Change 4a: OAuth fetchTools bug fix
 
-**Original code (`mcp_tools_original.js`, line 122):**
+**Original code (`mcp_tools_original.js`, line 168 in v0.8.5; line 122 in v0.8.3-rc1):**
 ```javascript
     if (connection && !oauthRequired) {
       tools = await connection.fetchTools();
     }
 ```
 
-**Patched code (`mcp_tools_patched.js`, line 157):**
+**Patched code (`mcp_tools_patched.js`, line 203 in v0.8.5):**
 ```javascript
     if (connection) {
       try {
@@ -289,9 +305,9 @@ mcpServers:
 | Condition | `if (connection && !oauthRequired)` → `if (connection)` |
 | Effect | The `!oauthRequired` check caused LibreChat to **skip tool discovery** for any MCP server that used OAuth. Even after successful OAuth authentication with valid tokens, `fetchTools()` was never called. Result: 0 tools discovered, model had no tools available. |
 | Error handling | Added try/catch around `fetchTools()`. Original code had no error handling — a failed fetch would crash the reinit process. |
-| This is a bug in | LibreChat v0.8.3-rc1, file `/app/api/server/services/Tools/mcp.js`, function `reinitMCPServer()` |
+| This is a bug in | LibreChat v0.8.3-rc1 through v0.8.5, file `/app/api/server/services/Tools/mcp.js`, function `reinitMCPServer()` (line 122 in v0.8.3-rc1, line 168 in v0.8.5) |
 
-### Change 4b: Tool filter — ALLOWED_TOOLS array (lines 128-155)
+### Change 4b: Tool filter — ALLOWED_TOOLS array (lines 174-201 in v0.8.5)
 
 **Original:** No tool filtering existed. All tools from the MCP server were passed to the model.
 
@@ -327,7 +343,7 @@ mcpServers:
     ];
 ```
 
-**Filtering logic (lines 164-168):**
+**Filtering logic (lines 210-214 in v0.8.5):**
 ```javascript
     if (ALLOWED_TOOLS.length > 0) {
       tools = fetchedTools.filter(t => ALLOWED_TOOLS.includes(t.name));
@@ -344,7 +360,7 @@ mcpServers:
 | Included categories | Search & Discovery (4), Sheets (3), Charts & Visualizations (4), Dimensions & Measures (4), Fields & Selections (6) |
 | Excluded categories | Datasets (11 tools), Data Products (8 tools), Glossary (12 tools), Other (1 tool) |
 
-### Change 4c: Debug logging (line 162)
+### Change 4c: Debug logging (line 208 in v0.8.5)
 
 **Added:**
 ```javascript
