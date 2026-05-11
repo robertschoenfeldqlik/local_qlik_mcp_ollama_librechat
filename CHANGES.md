@@ -395,9 +395,9 @@ docker logs librechat --tail 20
 
 | Setting | Original Template | Deployed Value | Reason |
 |---|---|---|---|
-| `QLIK_TENANT_URL` | `https://your-tenant.us.qlikcloud.com` | `https://your-tenant.us.qlikcloud.com` | User's actual Qlik Cloud tenant |
+| `QLIK_TENANT_URL` | `https://your-tenant.us.qlikcloud.com` | `https://<your-tenant>.us.qlikcloud.com` | Set to your actual Qlik Cloud tenant by the deploy script |
 | `QLIK_API_KEY` | `your_qlik_api_key_here` | Removed | Switched to OAuth — API key no longer used |
-| `QLIK_OAUTH_CLIENT_ID` | not in original | `your-oauth-client-id` | User's OAuth client ID for MCP auth |
+| `QLIK_OAUTH_CLIENT_ID` | not in original | `<your-oauth-client-id>` | Your Qlik Cloud OAuth client ID, set by the deploy script |
 | `VECTOR_DB_TYPE` | `pg` | `pgvector` | Fixed RAG API crash |
 | `CREDS_KEY` | placeholder | Auto-generated 32-char hex | `openssl rand -hex 16` |
 | `CREDS_IV` | placeholder | Auto-generated 16-char hex | `openssl rand -hex 8` |
