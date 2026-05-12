@@ -76,10 +76,7 @@ The script performs a **7-step automated deployment**:
    docker compose exec ollama ollama pull qwen3:14b
    ```
 
-5. **Apply the MCP patch** (required every time after `docker compose pull` or container rebuild):
-   ```bash
-   docker cp mcp_tools_patched.js librechat:/app/api/server/services/Tools/mcp.js
-   ```
+5. **The MCP patch is mounted automatically** via the `docker-compose.yml` volumes block — no manual `docker cp` needed. To update the patch later, edit `mcp_tools_patched.js` and run `docker compose restart api`.
 
 6. **Open LibreChat:** http://localhost:3080
 
@@ -207,12 +204,14 @@ if (connection && !oauthRequired) {
 if (connection) {
 ```
 
-**How to apply:**
-```bash
-docker cp mcp_tools_patched.js librechat:/app/api/server/services/Tools/mcp.js
+**How to apply:** The patch is mounted automatically via a `docker-compose.yml` bind mount on the `api` service:
+
+```yaml
+volumes:
+  - ./mcp_tools_patched.js:/app/api/server/services/Tools/mcp.js:ro
 ```
 
-**IMPORTANT:** This patch must be re-applied every time the LibreChat container is rebuilt (after `docker compose pull`, `docker compose up --build`, etc.) because it modifies a file inside the container image.
+It persists across `docker compose pull`, container recreation, and host reboots — **no manual re-application needed**. To update the patch, edit `mcp_tools_patched.js` locally and run `docker compose restart api`.
 
 **Verification:** After applying the patch and opening a new chat, check the logs:
 ```bash
@@ -294,12 +293,28 @@ To add more tools, edit the `ALLOWED_TOOLS` array in `mcp_tools_patched.js` and 
 ```yaml
 models:
   default:
+    - "qwen3:8b-nothinker"   # custom variant, see below
     - "qwen3:8b"
     - "qwen3:14b"
-  fetch: false  # Only show these two models
+  fetch: false
 ```
 
-`qwen3:8b` is the recommended default. `qwen3:14b` provides higher quality but requires more VRAM (may cause OOM on 8GB cards with large context).
+`qwen3:8b-nothinker` is the recommended default — a custom Modelfile-built variant with thinking disabled and temperature baked to 0 for the most consistent tool calls. `qwen3:8b` is the unmodified base. `qwen3:14b` provides higher quality but requires more VRAM (may cause OOM on 8GB cards with large context).
+
+#### 7b. `Modelfile.nothinker` — disabling Qwen3 reasoning mode
+
+Qwen3 has a built-in reasoning mode that emits `<think>...</think>` blocks before responses. For a tool-calling agent this wastes tokens and delays the first tool call. The included `Modelfile.nothinker` builds a variant of `qwen3:8b` with:
+
+- `SYSTEM /no_think` baked in (disables reasoning mode)
+- `temperature 0` (maximum determinism)
+- `num_ctx 16384` (matches `OLLAMA_CONTEXT_LENGTH`)
+
+The deploy scripts run `ollama create qwen3:8b-nothinker -f Modelfile.nothinker` after pulling the base model. To rebuild manually after editing `Modelfile.nothinker`:
+
+```bash
+docker cp Modelfile.nothinker librechat-ollama:/tmp/Modelfile.nothinker
+docker compose exec ollama ollama create qwen3:8b-nothinker -f /tmp/Modelfile.nothinker
+```
 
 ---
 
@@ -333,60 +348,61 @@ This ensures the system prompt is always injected, even if the user sets a custo
 
 ---
 
-### 10. XML-Tagged System Prompt for Qwen3
+### 10. No-Think System Prompt with Explicit Tool List
 
 **File:** `librechat.yaml`
 
 **Problem:** Generic text prompts didn't reliably compel the model to call MCP tools. The model would often:
 - Ask the user for IDs instead of searching for them
 - Answer from memory instead of calling tools
-- Hallucinate tool names that don't exist
+- Hallucinate tool names like `qlik_search_mcp` that don't exist
+- Emit long `<think>...</think>` reasoning blocks (Qwen3's default behavior) before finally calling a tool
 
-**Fix:** A structured XML-tagged prompt optimized for Qwen3's instruction-following:
+**Fix:** A direct prompt prefixed with `/no_think` to disable Qwen3's reasoning mode, followed by an exhaustive list of tool names and their required arguments:
 
 ```yaml
 promptPrefix: |
-  <role>You are a Qlik Cloud MCP tool-calling agent. Your ONLY job is to call MCP tools
-  and return their results. You have NO internal knowledge about the user's Qlik environment.</role>
+  /no_think
+  You are a Qlik Cloud MCP tool-calling agent. Do NOT think or reason. IMMEDIATELY call a tool.
 
-  <mandatory>
-  EVERY response to a Qlik-related question MUST start with a tool call. You are FORBIDDEN
-  from answering any Qlik question without first calling a tool. If you respond with text
-  instead of a tool call, you have failed.
-  </mandatory>
+  IMPORTANT: You have NO internal knowledge about Qlik. You MUST call a tool for every question. Do NOT write text before calling a tool. Do NOT invent tool names.
 
-  <workflow>
-  Step 1: User asks question → IMMEDIATELY call a tool. Do not write any text first.
-  Step 2: If you need an ID, call qlik_search first to find it.
-  Step 3: After getting tool results, present them clearly with counts and bullet points.
-  Step 4: If no results, say "No results found." Never invent data.
-  </workflow>
+  TOOL NAMES (use ONLY these exact names):
+  - qlik_search — find apps, data products, or any resource
+  - qlik_search_spaces — find spaces
+  - qlik_search_users — find users
+  - qlik_describe_app — get app details (needs app ID)
+  - qlik_list_sheets — list sheets (needs app ID)
+  - qlik_create_sheet — create a sheet
+  - qlik_get_sheet_details — sheet details (needs app ID + sheet ID)
+  - qlik_get_chart_info — chart info (needs app ID + object ID)
+  - qlik_get_chart_data — chart data (needs app ID + object ID)
+  - qlik_add_chart — add a chart (needs app ID + sheet ID)
+  - qlik_add_filter — add a filter (needs app ID + sheet ID)
+  - qlik_list_dimensions — list dimensions (needs app ID)
+  - qlik_create_dimension — create a dimension
+  - qlik_list_measures — list measures (needs app ID)
+  - qlik_create_measure — create a measure
+  - qlik_get_fields — list fields (needs app ID)
+  - qlik_get_field_values — field values (needs app ID + field name)
+  - qlik_search_field_values — search field values
+  - qlik_get_current_selections — current selections (needs app ID)
+  - qlik_select_values — make selections (needs app ID + field + values)
+  - qlik_clear_selections — clear selections (needs app ID)
 
-  <tools>
-  SEARCH: qlik_search (find anything), qlik_search_spaces, qlik_search_users, qlik_describe_app
-  SHEETS: qlik_list_sheets, qlik_create_sheet, qlik_get_sheet_details
-  CHARTS: qlik_get_chart_info, qlik_get_chart_data, qlik_add_chart, qlik_add_filter
-  DIMS/MEASURES: qlik_list_dimensions, qlik_create_dimension, qlik_list_measures, qlik_create_measure
-  FIELDS: qlik_get_fields, qlik_get_field_values, qlik_search_field_values
-  SELECTIONS: qlik_get_current_selections, qlik_select_values, qlik_clear_selections
-  </tools>
-
-  <rules>
-  - ALWAYS call a tool first. Never answer from memory.
-  - Never ask the user for IDs. Use qlik_search to find them yourself.
-  - One tool at a time. Wait for result before next action.
-  - Only use tool names listed above. Never invent tool names.
-  - Include counts when asked "how many".
-  - If a tool fails, fix parameters and retry once.
-  </rules>
+  NEVER use tool names like "qlik_search_mcp" or any name not listed above.
+  To find data products: call qlik_search with resourceType="dataproduct".
+  To find an ID: call qlik_search first, then use the ID in follow-up calls.
+  Present results with counts and bullet points. If empty, say "No results found."
 ```
 
 **Key design decisions:**
-- **"NO internal knowledge"** — tells the model it cannot answer from memory, forcing tool use
-- **"You have failed"** — strong negative framing that Qwen3 responds well to
-- **XML tags** (`<role>`, `<mandatory>`, `<rules>`) — Qwen3 respects structured section boundaries better than plain text
-- **Tool selection guide** — maps user intent to specific tool names so the model doesn't guess
-- **"Never ask the user for IDs"** — prevents the model from asking clarifying questions instead of searching
+- **`/no_think` prefix** — Qwen3-specific directive that disables its built-in reasoning mode. Without this, the model emits `<think>...</think>` blocks that waste tokens, delay the first tool call, and frequently second-guess themselves into not calling a tool at all. Combined with `Modelfile.nothinker` (which bakes `/no_think` into the model's system prompt), this is belt-and-suspenders.
+- **Explicit tool list with required args** — eliminates hallucinated tool names. Without it, the model would invent plausible-sounding names like `qlik_search_mcp` or `qlik_list_apps`.
+- **"NO internal knowledge"** — tells the model it cannot answer from memory, forcing tool use.
+- **Concrete "how to find X" examples** — `resourceType="dataproduct"` for the data-product case (which is otherwise non-obvious), and "qlik_search first, then ID" for any lookup workflow.
+
+**Earlier iteration:** A prior version used `<role>`, `<mandatory>`, `<workflow>`, `<tools>`, `<rules>` XML tags. It was replaced by the current flat-text version after observing that Qwen3 was equally responsive to the explicit tool list and the `/no_think` directive — at lower prompt-token cost.
 
 ---
 
@@ -485,10 +501,8 @@ docker compose logs -f api
 # View Ollama logs
 docker compose logs -f ollama
 
-# Restart LibreChat + re-apply patch
+# Restart LibreChat (patch is auto-applied via the docker-compose volume mount)
 docker compose restart api
-sleep 10
-docker cp mcp_tools_patched.js librechat:/app/api/server/services/Tools/mcp.js
 
 # Pull a new Ollama model
 docker compose exec ollama ollama pull <model>
@@ -506,11 +520,11 @@ docker exec librechat-mongodb mongosh --quiet --eval "db.getSiblingDB('LibreChat
 ## Troubleshooting
 
 ### MCP shows 0 tools / "Tools: undefined"
-The MCP patch was not applied or was lost after a container rebuild. Re-apply:
+Verify the patch is mounted into the container:
 ```bash
-docker cp mcp_tools_patched.js librechat:/app/api/server/services/Tools/mcp.js
+docker compose exec api head -3 /app/api/server/services/Tools/mcp.js
 ```
-Then open a new chat to trigger tool discovery.
+The output should match the top of your local `mcp_tools_patched.js`. If it doesn't, the `docker-compose.yml` volume mount for `mcp_tools_patched.js` is missing — check the `api.volumes` block, then `docker compose up -d` to recreate the container and open a new chat to trigger tool discovery.
 
 ### "Message pruning removed all messages"
 Context window too small for the number of tool schemas. Either:
@@ -546,3 +560,4 @@ Ensure `VECTOR_DB_TYPE=pgvector` in `.env` (not `pg`).
 - All images are pulled from public registries (no custom Dockerfiles)
 - Containers use `restart: unless-stopped` for automatic recovery
 - The MCP patch was originally written for LibreChat v0.8.3-rc1 and re-validated against v0.8.5 (the bug persists). Future versions may fix the OAuth bug natively — check `/app/api/server/services/Tools/mcp.js` for `if (connection && !oauthRequired)` before applying.
+- **Security:** the defaults (`ALLOW_REGISTRATION=true`, MongoDB `--noauth`, OAuth tokens stored without DB auth) make this safe only on `localhost`. After creating your first account, set `ALLOW_REGISTRATION=false` in `.env` and run `docker compose restart api` to disable open registration. Do not expose port 3080 to any network where untrusted users can reach it.

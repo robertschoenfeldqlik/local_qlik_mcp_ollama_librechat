@@ -10,7 +10,7 @@ services:
       meilisearch:
         condition: service_started
       ollama:
-        condition: service_started
+        condition: service_healthy
       rag_api:
         condition: service_started
     env_file:
@@ -29,6 +29,7 @@ services:
       - DEBUG=librechat:mcp*
     volumes:
       - ./librechat.yaml:/app/librechat.yaml:ro
+      - ./mcp_tools_patched.js:/app/api/server/services/Tools/mcp.js:ro
       - librechat_images:/app/client/public/images
       - librechat_logs:/app/api/logs
     restart: unless-stopped
@@ -83,6 +84,12 @@ services:
     container_name: librechat-ollama
     volumes:
       - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     environment:
       - OLLAMA_NUM_PARALLEL=1
       - OLLAMA_MAX_LOADED_MODELS=1

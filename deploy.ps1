@@ -1,4 +1,10 @@
 #Requires -Version 5.1
+
+param(
+    [string]$QlikTenantUrl,
+    [string]$QlikOAuthClientId
+)
+
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
@@ -15,7 +21,7 @@ Write-Host ""
 # 1. Pre-flight checks
 # -------------------------------------------------------
 
-Write-Host "[1/7] Checking prerequisites..."
+Write-Host "[1/6] Checking prerequisites..."
 
 # Docker
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -43,12 +49,14 @@ try {
 Write-Host ""
 
 # -------------------------------------------------------
-# 2. Prompt for Qlik credentials
+# 2. Qlik credentials (from params or prompt)
 # -------------------------------------------------------
 
-Write-Host "[2/7] Qlik Cloud credentials..."
+Write-Host "[2/6] Qlik Cloud credentials..."
 
-$QlikTenantUrl = Read-Host "  Qlik Cloud tenant URL (e.g. https://tenant.us.qlikcloud.com)"
+if ([string]::IsNullOrWhiteSpace($QlikTenantUrl)) {
+    $QlikTenantUrl = Read-Host "  Qlik Cloud tenant URL (e.g. https://tenant.us.qlikcloud.com)"
+}
 $QlikTenantUrl = $QlikTenantUrl.TrimEnd("/")
 
 if ([string]::IsNullOrWhiteSpace($QlikTenantUrl)) {
@@ -56,7 +64,9 @@ if ([string]::IsNullOrWhiteSpace($QlikTenantUrl)) {
     exit 1
 }
 
-$QlikOAuthClientId = Read-Host "  Qlik Cloud OAuth Client ID"
+if ([string]::IsNullOrWhiteSpace($QlikOAuthClientId)) {
+    $QlikOAuthClientId = Read-Host "  Qlik Cloud OAuth Client ID"
+}
 
 if ([string]::IsNullOrWhiteSpace($QlikOAuthClientId)) {
     Write-Error "OAuth Client ID cannot be empty."
@@ -72,7 +82,7 @@ Write-Host ""
 # 3. Generate .env
 # -------------------------------------------------------
 
-Write-Host "[3/7] Configuring environment..."
+Write-Host "[3/6] Configuring environment..."
 
 function New-HexSecret($Bytes) {
     $buf = New-Object byte[] $Bytes
@@ -124,7 +134,7 @@ DB_PORT=5432
 # 4. Update librechat.yaml with user's Qlik credentials
 # -------------------------------------------------------
 
-Write-Host "[4/7] Updating librechat.yaml with your Qlik credentials..."
+Write-Host "[4/6] Updating librechat.yaml with your Qlik credentials..."
 
 $yamlFile = Join-Path $ScriptDir "librechat.yaml"
 if (Test-Path $yamlFile) {
@@ -149,49 +159,68 @@ Write-Host ""
 # 5. Start Docker Compose stack
 # -------------------------------------------------------
 
-Write-Host "[5/7] Starting Docker Compose stack..."
+Write-Host "[5/6] Starting Docker Compose stack..."
 docker compose -f $Compose up -d
 if ($LASTEXITCODE -ne 0) { Write-Error "Docker Compose failed to start."; exit 1 }
 
-# Wait for containers to be healthy
-Write-Host "  Waiting for services to start..."
-Start-Sleep -Seconds 15
+# Wait for Ollama to be ready (poll instead of fixed sleep)
+Write-Host "  Waiting for Ollama to be ready..."
+$timeout = 90
+$elapsed = 0
+$ready = $false
+while ($elapsed -lt $timeout) {
+    docker compose -f $Compose exec -T ollama ollama list 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $ready = $true
+        break
+    }
+    Start-Sleep -Seconds 3
+    $elapsed += 3
+}
+if (-not $ready) {
+    Write-Host "  Warning: Ollama did not become ready within ${timeout}s. Continuing anyway."
+} else {
+    Write-Host "  Ollama is ready (after ${elapsed}s)."
+}
 
 Write-Host ""
 
 # -------------------------------------------------------
-# 6. Pull Ollama models
+# 6. Pull Ollama models + build nothinker variant
 # -------------------------------------------------------
 
-Write-Host "[6/7] Pulling Ollama models (this may take a few minutes)..."
+Write-Host "[6/6] Pulling Ollama models (this may take several minutes)..."
 
-Write-Host "  [1/2] qwen3:8b (8B -- best for MCP tool calling)..."
+Write-Host "  [1/4] qwen3:8b (8B -- base model)..."
 docker compose -f $Compose exec -T ollama ollama pull qwen3:8b
 if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: Failed to pull qwen3:8b" }
 
-Write-Host "  [2/2] qwen3:14b (14B -- higher quality, needs more VRAM)..."
-docker compose -f $Compose exec -T ollama ollama pull qwen3:14b
-if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: Failed to pull qwen3:14b" }
+Write-Host "  [2/4] qwen3:4b (4B -- recommended for <=4GB VRAM)..."
+docker compose -f $Compose exec -T ollama ollama pull qwen3:4b
+if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: Failed to pull qwen3:4b" }
 
-Write-Host ""
+# Note: destination file is named *.mf (not /tmp/Modelfile.*) to work around an
+# Ollama 0.23.x quirk where `ollama create -f /tmp/Modelfile.X` fails with
+# "no Modelfile or safetensors files found." Anything else works fine.
 
-# -------------------------------------------------------
-# 7. Apply MCP tools patch
-# -------------------------------------------------------
-
-Write-Host "[7/7] Applying MCP tools patch (OAuth fix + tool filter)..."
-
-$PatchFile = Join-Path $ScriptDir "mcp_tools_patched.js"
-if (Test-Path $PatchFile) {
-    docker cp $PatchFile librechat:/app/api/server/services/Tools/mcp.js
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "  Patch applied successfully."
-    } else {
-        Write-Host "  Warning: Failed to apply patch. You may need to run:"
-        Write-Host "    docker cp mcp_tools_patched.js librechat:/app/api/server/services/Tools/mcp.js"
-    }
+Write-Host "  [3/4] Building qwen3:8b-nothinker (thinking disabled)..."
+$ModelfilePath = Join-Path $ScriptDir "Modelfile.nothinker"
+if (Test-Path $ModelfilePath) {
+    docker cp $ModelfilePath librechat-ollama:/tmp/8b-nothinker.mf
+    docker compose -f $Compose exec -T ollama ollama create qwen3:8b-nothinker -f /tmp/8b-nothinker.mf
+    if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: Failed to create qwen3:8b-nothinker" }
 } else {
-    Write-Host "  Warning: mcp_tools_patched.js not found. Skipping patch."
+    Write-Host "  Warning: Modelfile.nothinker not found. Skipping."
+}
+
+Write-Host "  [4/4] Building qwen3:4b-nothinker (recommended default)..."
+$Modelfile4bPath = Join-Path $ScriptDir "Modelfile.4b-nothinker"
+if (Test-Path $Modelfile4bPath) {
+    docker cp $Modelfile4bPath librechat-ollama:/tmp/4b-nothinker.mf
+    docker compose -f $Compose exec -T ollama ollama create qwen3:4b-nothinker -f /tmp/4b-nothinker.mf
+    if ($LASTEXITCODE -ne 0) { Write-Host "  Warning: Failed to create qwen3:4b-nothinker" }
+} else {
+    Write-Host "  Warning: Modelfile.4b-nothinker not found. Skipping."
 }
 
 Write-Host ""
@@ -205,19 +234,20 @@ Write-Host "  DEPLOYMENT COMPLETE"
 Write-Host "=============================================="
 Write-Host ""
 Write-Host "  App:    http://localhost:3080"
-Write-Host "  Models: qwen3:8b (default), qwen3:14b"
+Write-Host "  Models: qwen3:4b-nothinker (default), qwen3:4b, qwen3:8b-nothinker, qwen3:8b"
 Write-Host "  Tools:  21 Qlik MCP tools (filtered from 53)"
+Write-Host ""
+Write-Host "  The MCP patch is applied via a docker-compose volume mount,"
+Write-Host "  so it persists across container restarts and recreations."
+Write-Host "  To update the patch, edit mcp_tools_patched.js and run:"
+Write-Host "    docker compose restart api"
 Write-Host ""
 Write-Host "  FIRST TIME SETUP:"
 Write-Host "  1. Open http://localhost:3080 and create an account"
-Write-Host "  2. Start a new chat, select 'qwen3:8b' model"
+Write-Host "  2. Start a new chat, select 'qwen3:4b-nothinker' model"
 Write-Host "  3. Click the Qlik MCP plugin icon and click 'Authorize'"
 Write-Host "  4. Sign in to Qlik Cloud when redirected"
 Write-Host "  5. Ask: 'What apps do I have in Qlik?'"
-Write-Host ""
-Write-Host "  IMPORTANT: After any 'docker compose pull' or rebuild,"
-Write-Host "  re-apply the patch:"
-Write-Host "    docker cp mcp_tools_patched.js librechat:/app/api/server/services/Tools/mcp.js"
 Write-Host ""
 Write-Host "  OAuth redirect URI (must be registered in Qlik Cloud):"
 Write-Host "    http://localhost:3080/api/mcp/qlik/oauth/callback"

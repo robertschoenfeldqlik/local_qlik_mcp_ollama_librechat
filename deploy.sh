@@ -5,6 +5,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
 COMPOSE="$SCRIPT_DIR/docker-compose.yml"
 
+QLIK_TENANT_URL_ARG=""
+QLIK_OAUTH_CLIENT_ID_ARG=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --tenant-url)
+            QLIK_TENANT_URL_ARG="$2"
+            shift 2
+            ;;
+        --client-id)
+            QLIK_OAUTH_CLIENT_ID_ARG="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: $0 [--tenant-url URL] [--client-id ID]"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
 echo ""
 echo "=============================================="
 echo "  LibreChat + Ollama + Qlik MCP  —  Deploy"
@@ -15,7 +39,7 @@ echo ""
 # 1. Pre-flight checks
 # -------------------------------------------------------
 
-echo "[1/7] Checking prerequisites..."
+echo "[1/6] Checking prerequisites..."
 
 # Docker
 if ! command -v docker &>/dev/null; then
@@ -43,12 +67,16 @@ fi
 echo ""
 
 # -------------------------------------------------------
-# 2. Prompt for Qlik credentials
+# 2. Qlik credentials (from flags or prompt)
 # -------------------------------------------------------
 
-echo "[2/7] Qlik Cloud credentials..."
+echo "[2/6] Qlik Cloud credentials..."
 
-read -rp "  Qlik Cloud tenant URL (e.g. https://tenant.us.qlikcloud.com): " QLIK_TENANT_URL
+if [[ -n "$QLIK_TENANT_URL_ARG" ]]; then
+    QLIK_TENANT_URL="$QLIK_TENANT_URL_ARG"
+else
+    read -rp "  Qlik Cloud tenant URL (e.g. https://tenant.us.qlikcloud.com): " QLIK_TENANT_URL
+fi
 QLIK_TENANT_URL="${QLIK_TENANT_URL%/}"
 
 if [[ -z "$QLIK_TENANT_URL" ]]; then
@@ -56,7 +84,11 @@ if [[ -z "$QLIK_TENANT_URL" ]]; then
     exit 1
 fi
 
-read -rp "  Qlik Cloud OAuth Client ID: " QLIK_OAUTH_CLIENT_ID
+if [[ -n "$QLIK_OAUTH_CLIENT_ID_ARG" ]]; then
+    QLIK_OAUTH_CLIENT_ID="$QLIK_OAUTH_CLIENT_ID_ARG"
+else
+    read -rp "  Qlik Cloud OAuth Client ID: " QLIK_OAUTH_CLIENT_ID
+fi
 
 if [[ -z "$QLIK_OAUTH_CLIENT_ID" ]]; then
     echo "Error: OAuth Client ID cannot be empty." >&2
@@ -72,7 +104,7 @@ echo ""
 # 3. Generate .env
 # -------------------------------------------------------
 
-echo "[3/7] Configuring environment..."
+echo "[3/6] Configuring environment..."
 
 if [[ -f "$ENV_FILE" ]]; then
     echo "  Existing .env found — updating Qlik credentials only."
@@ -115,7 +147,7 @@ fi
 # 4. Update librechat.yaml with user's Qlik credentials
 # -------------------------------------------------------
 
-echo "[4/7] Updating librechat.yaml with your Qlik credentials..."
+echo "[4/6] Updating librechat.yaml with your Qlik credentials..."
 
 YAML_FILE="$SCRIPT_DIR/librechat.yaml"
 if [[ -f "$YAML_FILE" ]]; then
@@ -137,45 +169,62 @@ echo ""
 # 5. Start Docker Compose stack
 # -------------------------------------------------------
 
-echo "[5/7] Starting Docker Compose stack..."
+echo "[5/6] Starting Docker Compose stack..."
 docker compose -f "$COMPOSE" up -d
 
-# Wait for containers to be healthy
-echo "  Waiting for services to start..."
-sleep 15
+# Wait for Ollama to be ready (poll instead of fixed sleep)
+echo "  Waiting for Ollama to be ready..."
+TIMEOUT=90
+ELAPSED=0
+READY=false
+while [[ $ELAPSED -lt $TIMEOUT ]]; do
+    if docker compose -f "$COMPOSE" exec -T ollama ollama list &>/dev/null; then
+        READY=true
+        break
+    fi
+    sleep 3
+    ELAPSED=$((ELAPSED + 3))
+done
+if [[ "$READY" == false ]]; then
+    echo "  Warning: Ollama did not become ready within ${TIMEOUT}s. Continuing anyway."
+else
+    echo "  Ollama is ready (after ${ELAPSED}s)."
+fi
 
 echo ""
 
 # -------------------------------------------------------
-# 6. Pull Ollama models
+# 6. Pull Ollama models + build nothinker variant
 # -------------------------------------------------------
 
-echo "[6/7] Pulling Ollama models (this may take a few minutes)..."
+echo "[6/6] Pulling Ollama models (this may take several minutes)..."
 
-echo "  [1/2] qwen3:8b (8B -- best for MCP tool calling)..."
+echo "  [1/4] qwen3:8b (8B -- base model)..."
 docker compose -f "$COMPOSE" exec -T ollama ollama pull qwen3:8b || echo "  Warning: Failed to pull qwen3:8b"
 
-echo "  [2/2] qwen3:14b (14B -- higher quality, needs more VRAM)..."
-docker compose -f "$COMPOSE" exec -T ollama ollama pull qwen3:14b || echo "  Warning: Failed to pull qwen3:14b"
+echo "  [2/4] qwen3:4b (4B -- recommended for <=4GB VRAM)..."
+docker compose -f "$COMPOSE" exec -T ollama ollama pull qwen3:4b || echo "  Warning: Failed to pull qwen3:4b"
 
-echo ""
+# Note: destination file is named *.mf (not /tmp/Modelfile.*) to work around an
+# Ollama 0.23.x quirk where `ollama create -f /tmp/Modelfile.X` fails with
+# "no Modelfile or safetensors files found." Anything else works fine.
 
-# -------------------------------------------------------
-# 7. Apply MCP tools patch
-# -------------------------------------------------------
-
-echo "[7/7] Applying MCP tools patch (OAuth fix + tool filter)..."
-
-PATCH_FILE="$SCRIPT_DIR/mcp_tools_patched.js"
-if [[ -f "$PATCH_FILE" ]]; then
-    if docker cp "$PATCH_FILE" librechat:/app/api/server/services/Tools/mcp.js; then
-        echo "  Patch applied successfully."
-    else
-        echo "  Warning: Failed to apply patch. You may need to run:"
-        echo "    docker cp mcp_tools_patched.js librechat:/app/api/server/services/Tools/mcp.js"
-    fi
+echo "  [3/4] Building qwen3:8b-nothinker (thinking disabled)..."
+MODELFILE="$SCRIPT_DIR/Modelfile.nothinker"
+if [[ -f "$MODELFILE" ]]; then
+    docker cp "$MODELFILE" librechat-ollama:/tmp/8b-nothinker.mf
+    docker compose -f "$COMPOSE" exec -T ollama ollama create qwen3:8b-nothinker -f /tmp/8b-nothinker.mf || echo "  Warning: Failed to create qwen3:8b-nothinker"
 else
-    echo "  Warning: mcp_tools_patched.js not found. Skipping patch."
+    echo "  Warning: Modelfile.nothinker not found. Skipping."
+fi
+
+echo "  [4/4] Building qwen3:4b-nothinker (recommended default)..."
+MODELFILE4B="$SCRIPT_DIR/Modelfile.4b-nothinker"
+if [[ -f "$MODELFILE4B" ]]; then
+    docker cp "$MODELFILE4B" librechat-ollama:/tmp/4b-nothinker.mf
+    docker compose -f "$COMPOSE" exec -T ollama ollama create qwen3:4b-nothinker -f /tmp/4b-nothinker.mf || echo "  Warning: Failed to create qwen3:4b-nothinker"
+else
+    echo "  Warning: Modelfile.4b-nothinker not found. Skipping."
 fi
 
 echo ""
@@ -189,19 +238,20 @@ echo "  DEPLOYMENT COMPLETE"
 echo "=============================================="
 echo ""
 echo "  App:    http://localhost:3080"
-echo "  Models: qwen3:8b (default), qwen3:14b"
+echo "  Models: qwen3:4b-nothinker (default), qwen3:4b, qwen3:8b-nothinker, qwen3:8b"
 echo "  Tools:  21 Qlik MCP tools (filtered from 53)"
+echo ""
+echo "  The MCP patch is applied via a docker-compose volume mount,"
+echo "  so it persists across container restarts and recreations."
+echo "  To update the patch, edit mcp_tools_patched.js and run:"
+echo "    docker compose restart api"
 echo ""
 echo "  FIRST TIME SETUP:"
 echo "  1. Open http://localhost:3080 and create an account"
-echo "  2. Start a new chat, select 'qwen3:8b' model"
+echo "  2. Start a new chat, select 'qwen3:4b-nothinker' model"
 echo "  3. Click the Qlik MCP plugin icon and click 'Authorize'"
 echo "  4. Sign in to Qlik Cloud when redirected"
 echo "  5. Ask: 'What apps do I have in Qlik?'"
-echo ""
-echo "  IMPORTANT: After any 'docker compose pull' or rebuild,"
-echo "  re-apply the patch:"
-echo "    docker cp mcp_tools_patched.js librechat:/app/api/server/services/Tools/mcp.js"
 echo ""
 echo "  OAuth redirect URI (must be registered in Qlik Cloud):"
 echo "    http://localhost:3080/api/mcp/qlik/oauth/callback"

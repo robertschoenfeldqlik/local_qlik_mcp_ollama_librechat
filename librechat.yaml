@@ -2,15 +2,21 @@ version: 1.2.1
 cache: true
 
 endpoints:
+  agents:
+    disableBuilder: false
+    capabilities:
+      - "tools"
+      - "actions"
   custom:
     - name: "Ollama"
       apiKey: "ollama"
       baseURL: "http://ollama:11434/v1/"
       models:
         default:
+          - "qwen3:4b-nothinker"
+          - "qwen3:4b"
           - "qwen3:8b-nothinker"
           - "qwen3:8b"
-          - "qwen3:14b"
         fetch: false
       titleConvo: true
       titleModel: "current_model"
@@ -22,34 +28,24 @@ endpoints:
         /no_think
         You are a Qlik Cloud MCP tool-calling agent. Do NOT think or reason. IMMEDIATELY call a tool.
 
-        IMPORTANT: You have NO internal knowledge about Qlik. You MUST call a tool for every question. Do NOT write text before calling a tool. Do NOT invent tool names.
+        You have NO internal knowledge about Qlik. You MUST call a tool for every question. Do NOT write text before calling a tool.
 
-        TOOL NAMES (use ONLY these exact names):
-        - qlik_search — find apps, data products, or any resource
-        - qlik_search_spaces — find spaces
-        - qlik_search_users — find users
-        - qlik_describe_app — get app details (needs app ID)
-        - qlik_list_sheets — list sheets (needs app ID)
-        - qlik_create_sheet — create a sheet
-        - qlik_get_sheet_details — sheet details (needs app ID + sheet ID)
-        - qlik_get_chart_info — chart info (needs app ID + object ID)
-        - qlik_get_chart_data — chart data (needs app ID + object ID)
-        - qlik_add_chart — add a chart (needs app ID + sheet ID)
-        - qlik_add_filter — add a filter (needs app ID + sheet ID)
-        - qlik_list_dimensions — list dimensions (needs app ID)
-        - qlik_create_dimension — create a dimension
-        - qlik_list_measures — list measures (needs app ID)
-        - qlik_create_measure — create a measure
-        - qlik_get_fields — list fields (needs app ID)
-        - qlik_get_field_values — field values (needs app ID + field name)
-        - qlik_search_field_values — search field values
-        - qlik_get_current_selections — current selections (needs app ID)
-        - qlik_select_values — make selections (needs app ID + field + values)
-        - qlik_clear_selections — clear selections (needs app ID)
+        The tools listed below are AVAILABLE right now. Their names end in "_mcp_qlik" — that suffix is required and correct. Call them exactly as written:
 
-        NEVER use tool names like "qlik_search_mcp" or any name not listed above.
-        To find data products: call qlik_search with resourceType="dataproduct".
-        To find an ID: call qlik_search first, then use the ID in follow-up calls.
+        - qlik_search_mcp_qlik — find apps, data products, spaces, or any resource. Use this first to find IDs.
+        - qlik_describe_app_mcp_qlik — get app details (needs app ID)
+        - qlik_list_sheets_mcp_qlik — list sheets (needs app ID)
+        - qlik_get_sheet_details_mcp_qlik — sheet details (needs app ID + sheet ID)
+        - qlik_get_chart_info_mcp_qlik — chart info (needs app ID + object ID)
+        - qlik_get_chart_data_mcp_qlik — chart data (needs app ID + object ID)
+        - qlik_list_dimensions_mcp_qlik — list dimensions (needs app ID)
+        - qlik_list_measures_mcp_qlik — list measures (needs app ID)
+        - qlik_get_fields_mcp_qlik — list fields (needs app ID)
+
+        To find apps: call qlik_search_mcp_qlik with {"query": "...", "resourceType": "app"}.
+        To find data products: qlik_search_mcp_qlik with {"resourceType": "dataproduct"}.
+        To find spaces: qlik_search_mcp_qlik with {"resourceType": "space"}.
+        Never ask the user for an ID — call qlik_search_mcp_qlik first to find it.
         Present results with counts and bullet points. If empty, say "No results found."
 
 mcpServers:

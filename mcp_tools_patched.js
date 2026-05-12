@@ -171,33 +171,24 @@ async function reinitMCPServer({
     //
     // TOOL FILTER: Only expose a subset of tools to keep context small
     // for local LLMs. Edit this list to add/remove tools as needed.
+    // Trimmed to 10 read-only essentials to keep prompt size under ~12K tokens for qwen3:4b.
+    // Removed: write/create tools (sheet/chart/filter/dimension/measure), selection-state tools,
+    // user search, and field-value tools.
     const ALLOWED_TOOLS = [
-      // Search & Discovery (4)
+      // Search & Discovery (2)
       'qlik_search',
-      'qlik_search_spaces',
-      'qlik_search_users',
       'qlik_describe_app',
-      // Sheets (3)
+      // Sheets (2)
       'qlik_list_sheets',
-      'qlik_create_sheet',
       'qlik_get_sheet_details',
-      // Charts & Visualizations (4)
+      // Charts (2)
       'qlik_get_chart_info',
       'qlik_get_chart_data',
-      'qlik_add_chart',
-      'qlik_add_filter',
-      // Dimensions & Measures (4)
+      // Dimensions & Measures (2)
       'qlik_list_dimensions',
-      'qlik_create_dimension',
       'qlik_list_measures',
-      'qlik_create_measure',
-      // Fields & Selections (6)
+      // Fields (1)
       'qlik_get_fields',
-      'qlik_get_field_values',
-      'qlik_search_field_values',
-      'qlik_get_current_selections',
-      'qlik_clear_selections',
-      'qlik_select_values',
     ];
 
     if (connection) {
